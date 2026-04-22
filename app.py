@@ -7,9 +7,24 @@ import pandas as pd
 app = Flask(__name__)
 CORS(app, resources={r"/*": {"origins": "*"}})
 
-# 🟢 AUTO LOAD DATA (VERY IMPORTANT FOR DEPLOYMENT)
+DB_NAME = "industry.db"
+
+
+# 🟢 AUTO LOAD DATA (safe + avoids duplicate reload)
 def load_data():
-    conn = sqlite3.connect("industry.db")
+    conn = sqlite3.connect(DB_NAME)
+    cursor = conn.cursor()
+
+    # Check if tables already exist
+    cursor.execute("SELECT name FROM sqlite_master WHERE type='table';")
+    existing_tables = [row[0] for row in cursor.fetchall()]
+
+    if existing_tables:
+        print("Tables already exist. Skipping reload.")
+        conn.close()
+        return
+
+    print("Loading CSV datasets...")
 
     for file in os.listdir():
         if file.endswith(".csv"):
@@ -26,18 +41,19 @@ def load_data():
 
     conn.close()
 
-# 🔴 Call this when app starts
+
+# 🔴 Call once on startup
 load_data()
 
 
-# Connect to DB
+# 🟢 DB connection
 def get_connection():
-    conn = sqlite3.connect("industry.db")
+    conn = sqlite3.connect(DB_NAME)
     conn.row_factory = sqlite3.Row
     return conn
 
 
-# Get all table names
+# 🟢 Get all tables
 @app.route('/tables')
 def get_tables():
     conn = get_connection()
@@ -50,7 +66,7 @@ def get_tables():
     return jsonify(tables)
 
 
-# Get data from any table
+# 🟢 Get data from any table
 @app.route('/data/<table_name>')
 def get_data(table_name):
     conn = get_connection()
@@ -67,13 +83,13 @@ def get_data(table_name):
     return jsonify(result)
 
 
-# Home
+# 🟢 Home route
 @app.route('/')
 def home():
     return "Dynamic API running 🚀"
 
 
-# 🔥 IMPORTANT FOR RENDER DEPLOYMENT
+# 🔥 REQUIRED FOR RENDER
 if __name__ == '__main__':
-    import os
-    app.run(host='0.0.0.0', port=int(os.environ.get("PORT", 10000)))    
+    port = int(os.environ.get("PORT", 10000))
+    app.run(host='0.0.0.0', port=port)
