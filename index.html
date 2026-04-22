@@ -1,0 +1,251 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Industrial Analytics | Premium Dashboard</title>
+
+    <!-- Google Fonts: Inter & Outfit for a modern feel -->
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800&family=Outfit:wght@600;700&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+    
+    <!-- Link to the new premium design system -->
+    <link rel="stylesheet" href="index.css">
+</head>
+
+<body>
+    <div class="app-wrapper">
+        <main class="main-content">
+            <!-- Global Error Notification -->
+            <div id="errorNotification" class="error-message" style="display: none; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.2); color: #ef4444; padding: 1rem; border-radius: 0.75rem; margin-bottom: 2rem;"></div>
+
+            <header class="dashboard-header">
+                <div>
+                    <h1 class="title">Industrial Analytics</h1>
+                    <p style="color: var(--text-muted); font-size: 0.875rem;">Real-time performance monitoring and data visualization</p>
+                </div>
+
+                <div class="controls">
+                    <select id="datasetSelector" class="dataset-selector"></select>
+                </div>
+            </header>
+
+
+
+            <div class="dashboard-grid">
+                <!-- Chart Card (Large) -->
+                <div class="card card-large">
+                    <h2 class="card-title">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="18" y1="20" x2="18" y2="10"></line><line x1="12" y1="20" x2="12" y2="4"></line><line x1="6" y1="20" x2="6" y2="14"></line></svg>
+                        Performance Matrix
+                    </h2>
+                    <div class="chart-container">
+                        <canvas id="dataChart"></canvas>
+                        <div id="chartStatus" class="status-message" style="text-align: center; padding-top: 5rem; color: var(--text-muted);">Initialising stream...</div>
+                    </div>
+                </div>
+
+                <!-- Data Records Card (Small/Side) -->
+                <div class="card card-small">
+                    <h2 class="card-title">
+                        <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path><polyline points="14 2 14 8 20 8"></polyline><line x1="16" y1="13" x2="8" y2="13"></line><line x1="16" y1="17" x2="8" y2="17"></line><polyline points="10 9 9 9 8 9"></polyline></svg>
+                        Recent Logs
+                    </h2>
+                    <div class="table-container">
+                        <table id="dataTable">
+                            <thead id="tableHead"></thead>
+                            <tbody id="tableBody"></tbody>
+                        </table>
+                        <div id="tableStatus" class="status-message" style="text-align: center; padding-top: 3rem; color: var(--text-muted);">Awaiting data packet...</div>
+                    </div>
+                </div>
+            </div>
+        </main>
+    </div>
+
+    <script>
+   let currentChart = null;
+
+const elements = {
+    selector: document.getElementById('datasetSelector'),
+    tableHead: document.getElementById('tableHead'),
+    tableBody: document.getElementById('tableBody'),
+    chartStatus: document.getElementById('chartStatus'),
+    tableStatus: document.getElementById('tableStatus'),
+    errorNotif: document.getElementById('errorNotification'),
+    chartCanvas: document.getElementById('dataChart')
+};
+
+// 🟢 NEW: Load datasets dynamically
+async function loadDatasets() {
+    try {
+        const res = await fetch("http://127.0.0.1:5000/tables");
+        const tables = await res.json();
+
+        elements.selector.innerHTML = "";
+
+        tables.forEach(table => {
+            const option = document.createElement("option");
+            option.value = table;
+            option.textContent = table.replace(/_/g, " ").toUpperCase();
+            elements.selector.appendChild(option);
+        });
+
+        // Load first dataset automatically
+        if (tables.length > 0) {
+            fetchAndUpdateData(tables[0]);
+        }
+
+    } catch (error) {
+        console.error("Error loading dataset list:", error);
+        showError("Failed to load datasets");
+    }
+}
+
+// 🔵 UPDATED: Fetch using dynamic table name
+async function fetchAndUpdateData(tableName) {
+    hideError();
+    showLoaders();
+
+    try {
+        const response = await fetch(`http://127.0.0.1:5000/data/${tableName}`);
+        if (!response.ok) throw new Error(`HTTP error! Status: ${response.status}`);
+
+        const data = await response.json();
+        const normalizedData = Array.isArray(data) ? data : (data.data || []);
+
+        if (normalizedData.length === 0) throw new Error("Dataset is empty.");
+
+        updateTable(normalizedData);
+        updateChart(normalizedData);
+
+    } catch (error) {
+        console.error("Dashboard Sync Error:", error);
+        showError("Connection failed. Ensure backend service is reachable.");
+        clearUI();
+    }
+}
+
+// 🟡 TABLE
+function updateTable(data) {
+    const headers = Object.keys(data[0]).slice(0, 4);
+
+    elements.tableHead.innerHTML =
+        `<tr>${headers.map(h => `<th>${h}</th>`).join('')}</tr>`;
+
+    elements.tableBody.innerHTML = data.slice(0, 10).map(row => {
+        return `<tr>${headers.map(h => `<td>${row[h]}</td>`).join('')}</tr>`;
+    }).join('');
+
+    elements.tableStatus.style.display = 'none';
+}
+
+// 🟣 CHART
+function updateChart(data) {
+    const canvas = elements.chartCanvas;
+    const ctx = canvas.getContext('2d');
+
+    const gradient = ctx.createLinearGradient(0, 0, 0, 400);
+    gradient.addColorStop(0, 'rgba(99, 102, 241, 1)');
+    gradient.addColorStop(1, 'rgba(168, 85, 247, 0.2)');
+
+    const headers = Object.keys(data[0]);
+    const labelKey = headers.find(h => typeof data[0][h] === 'string') || headers[0];
+    const valueKey = headers.find(h => typeof data[0][h] === 'number') || (headers[1] || headers[0]);
+
+    const labels = data.map(row => row[labelKey]);
+    const values = data.map(row => Number(row[valueKey]) || 0);
+
+    if (currentChart) currentChart.destroy();
+
+    elements.chartStatus.style.display = 'none';
+    elements.chartCanvas.style.display = 'block';
+
+    currentChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+            labels: labels,
+            datasets: [{
+                label: valueKey.toUpperCase(),
+                data: values,
+                backgroundColor: gradient,
+                borderColor: 'rgba(99, 102, 241, 1)',
+                borderWidth: 2,
+                borderRadius: 8,
+                hoverBackgroundColor: 'rgba(6, 182, 212, 1)',
+                barPercentage: 0.6
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: false,
+            plugins: {
+                legend: {
+                    display: true,
+                    labels: {
+                        color: '#94a3b8',
+                        font: { family: "'Inter', sans-serif", weight: '600' }
+                    }
+                },
+                tooltip: {
+                    backgroundColor: 'rgba(15, 23, 42, 0.9)',
+                    titleColor: '#f1f5f9',
+                    bodyColor: '#f1f5f9',
+                    borderColor: 'rgba(255, 255, 255, 0.1)',
+                    borderWidth: 1,
+                    padding: 12,
+                    displayColors: false
+                }
+            },
+            scales: {
+                x: {
+                    grid: { display: false },
+                    ticks: { color: '#64748b' }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(255, 255, 255, 0.05)' },
+                    ticks: { color: '#64748b' }
+                }
+            }
+        }
+    });
+}
+
+// 🔴 UI HELPERS
+function showLoaders() {
+    elements.tableHead.innerHTML = '';
+    elements.tableBody.innerHTML = '';
+    elements.tableStatus.style.display = 'block';
+    elements.chartCanvas.style.display = 'none';
+    elements.chartStatus.style.display = 'block';
+}
+
+function clearUI() {
+    elements.tableStatus.textContent = 'No data stream.';
+    elements.chartStatus.textContent = 'Awaiting connection...';
+}
+
+function showError(message) {
+    elements.errorNotif.textContent = message;
+    elements.errorNotif.style.display = 'block';
+}
+
+function hideError() {
+    elements.errorNotif.style.display = 'none';
+}
+
+// 🟢 EVENT LISTENERS
+elements.selector.addEventListener('change', (e) => {
+    fetchAndUpdateData(e.target.value);
+});
+
+// 🔥 IMPORTANT: START WITH DYNAMIC LOAD
+document.addEventListener('DOMContentLoaded', () => {
+    loadDatasets();
+});
+    </script>
+</body>
+
+</html>
